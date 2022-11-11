@@ -294,6 +294,7 @@ void Config::setActivityTypes(
 }
 
 bool Config::handleOption(const std::string& name, std::string& val) {
+  LOG(ERROR) << "!!! handle option " << name << " " << val;
   // Event Profiler
   if (!name.compare(kEventsKey)) {
     vector<string> event_names = splitAndTrim(val, ',');
@@ -361,6 +362,7 @@ bool Config::handleOption(const std::string& name, std::string& val) {
   else if (!name.compare(kClientInterfaceEnableOpInputsCollection)) {
     enableOpInputsCollection_ = toBool(val);
   } else if (!name.compare(kPythonStackTrace)) {
+    LOG(ERROR) << "!!! reading config" << name << " : " << toBool(val);
     enablePythonStackTrace_ = toBool(val);
   }
 
