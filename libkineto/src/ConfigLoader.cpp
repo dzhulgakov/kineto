@@ -36,7 +36,7 @@ constexpr char kOnDemandConfigFile[] = "libkineto.conf";
 #endif
 
 constexpr std::chrono::seconds kConfigUpdateIntervalSecs(300);
-constexpr std::chrono::seconds kOnDemandConfigUpdateIntervalSecs(5);
+constexpr std::chrono::seconds kOnDemandConfigUpdateIntervalSecs(1);
 
 #ifdef __linux__
 static struct sigaction originalUsr2Handler = {};
@@ -144,7 +144,7 @@ int ConfigLoader::contextCountForGpu(uint32_t device) {
 
 ConfigLoader::ConfigLoader()
     : configUpdateIntervalSecs_(kConfigUpdateIntervalSecs),
-      onDemandConfigUpdateIntervalSecs_(kOnDemandConfigUpdateIntervalSecs),
+      onDemandConfigUpdateIntervalSecs_(kConfigUpdateIntervalSecs), // will be loaded from the regular config
       stopFlag_(false),
       onDemandSignal_(false) {
 }
@@ -262,37 +262,37 @@ void ConfigLoader::configureFromDaemon(
 }
 
 void ConfigLoader::updateConfigThread() {
-  auto now = system_clock::now();
-  auto next_config_load_time = now;
-  auto next_on_demand_load_time = now + onDemandConfigUpdateIntervalSecs_;
-  seconds interval = configUpdateIntervalSecs_;
-  if (interval > onDemandConfigUpdateIntervalSecs_) {
-    interval = onDemandConfigUpdateIntervalSecs_;
-  }
+  // initialze with some time buffer
+  auto prev_config_load_time = system_clock::now() - configUpdateIntervalSecs_ * 2;
+  auto prev_on_demand_load_time = prev_config_load_time;
   auto onDemandConfig = std::make_unique<Config>();
 
   // This can potentially sleep for long periods of time, so allow
   // the desctructor to wake it to avoid a 5-minute long destruct period.
   for (;;) {
-    {
+    auto interval = std::min(
+        configUpdateIntervalSecs_ + prev_config_load_time,
+        onDemandConfigUpdateIntervalSecs_ + prev_on_demand_load_time) - system_clock::now();
+    if (interval.count() > 0) {
       std::unique_lock<std::mutex> lock(updateThreadMutex_);
       updateThreadCondVar_.wait_for(lock, interval);
     }
     if (stopFlag_) {
       break;
     }
-    now = system_clock::now();
-    if (now > next_config_load_time) {
+    auto now = system_clock::now();
+    if (now > prev_config_load_time + configUpdateIntervalSecs_) {
       updateBaseConfig();
-      next_config_load_time = now + configUpdateIntervalSecs_;
+      onDemandConfigUpdateIntervalSecs_ = config_->onDemandConfigUpdateIntervalSecs();
+      prev_config_load_time = now;
     }
     if (onDemandSignal_.exchange(false)) {
       onDemandConfig = config_->clone();
       configureFromSignal(now, *onDemandConfig);
-    } else if (now > next_on_demand_load_time) {
+    } else if (now > prev_on_demand_load_time + onDemandConfigUpdateIntervalSecs_) {
       onDemandConfig = std::make_unique<Config>();
       configureFromDaemon(now, *onDemandConfig);
-      next_on_demand_load_time = now + onDemandConfigUpdateIntervalSecs_;
+      prev_on_demand_load_time = now;
     }
     if (onDemandConfig->verboseLogLevel() >= 0) {
       LOG(INFO) << "Setting verbose level to "
