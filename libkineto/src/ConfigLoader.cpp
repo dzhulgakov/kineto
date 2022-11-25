@@ -159,10 +159,18 @@ void ConfigLoader::startThread() {
     }
     updateThread_ =
         std::make_unique<std::thread>(&ConfigLoader::updateConfigThread, this);
+    // It's tricky to get the desctruction order right - some of the global objects
+    // may be destroyed before ConfigLoader's destructor stops the thread. Thus we
+    // install an explicit atexit handler. It's installed pretty late in the process
+    // to ensure that it'd be called early (LIFO order wrt global objects).
+    static bool unused = []() {
+      std::atexit(ConfigLoader::stopThreadForSingleton);
+      return true;
+    }();
   }
 }
 
-ConfigLoader::~ConfigLoader() {
+void ConfigLoader::stopThread() {
   if (updateThread_) {
     stopFlag_ = true;
     {
@@ -170,7 +178,16 @@ ConfigLoader::~ConfigLoader() {
       updateThreadCondVar_.notify_one();
     }
     updateThread_->join();
+    updateThread_ = nullptr;
   }
+}
+
+void ConfigLoader::stopThreadForSingleton() {
+  ConfigLoader::instance().stopThread();
+}
+
+ConfigLoader::~ConfigLoader() {
+  stopThread();
 #if !USE_GOOGLE_LOG
   Logger::clearLoggerObservers();
 #endif // !USE_GOOGLE_LOG

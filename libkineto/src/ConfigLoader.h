@@ -116,6 +116,8 @@ class ConfigLoader {
   IDaemonConfigLoader* daemonConfigLoader();
 
   void startThread();
+  void stopThread();
+  static void stopThreadForSingleton(); // calls instance().stopThread()
   void updateConfigThread();
   void updateBaseConfig();
 
